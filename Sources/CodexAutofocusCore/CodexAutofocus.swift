@@ -1,0 +1,309 @@
+import Foundation
+
+public struct CodexAutofocus: Sendable {
+    public struct InstallOutcome: Sendable {
+        public var changed: Bool
+        public var configBackupPath: String?
+        public var hooksBackupPath: String?
+        public var hookCommand: String
+    }
+
+    public struct Status: Sendable {
+        public var enabled: Bool
+        public var registered: Bool
+        public var currentNotify: NotifyCommand?
+        public var hookCommand: String
+        public var issues: [String]
+    }
+
+    public struct State: Codable, Sendable {
+        public var enabled: Bool
+        public var installedAt: String?
+        public var hookCommand: String?
+        public var previousNotify: NotifyCommand?
+        public var installedNotify: NotifyCommand?
+
+        public init(
+            enabled: Bool = true,
+            installedAt: String? = nil,
+            hookCommand: String? = nil,
+            previousNotify: NotifyCommand? = nil,
+            installedNotify: NotifyCommand? = nil
+        ) {
+            self.enabled = enabled
+            self.installedAt = installedAt
+            self.hookCommand = hookCommand
+            self.previousNotify = previousNotify
+            self.installedNotify = installedNotify
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case enabled
+            case installedAt
+            case hookCommand
+            case previousNotify
+            case installedNotify
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+            installedAt = try container.decodeIfPresent(String.self, forKey: .installedAt)
+            hookCommand = try container.decodeIfPresent(String.self, forKey: .hookCommand)
+            previousNotify = try container.decodeIfPresent(NotifyCommand.self, forKey: .previousNotify)
+            installedNotify = try container.decodeIfPresent(NotifyCommand.self, forKey: .installedNotify)
+        }
+    }
+
+    public static let managedMarker = "--managed-by codex-autofocus"
+    public static let hookStatusMessage = "Codex Autofocus is bringing Codex forward"
+
+    public var homeDirectory: URL
+    public var codexBundleIdentifier: String
+
+    public init(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        codexBundleIdentifier: String = "com.openai.codex"
+    ) {
+        self.homeDirectory = homeDirectory
+        self.codexBundleIdentifier = codexBundleIdentifier
+    }
+
+    public var codexHome: URL {
+        homeDirectory.appendingPathComponent(".codex", isDirectory: true)
+    }
+
+    public var configURL: URL {
+        codexHome.appendingPathComponent("config.toml")
+    }
+
+    public var hooksURL: URL {
+        codexHome.appendingPathComponent("hooks.json")
+    }
+
+    public var stateURL: URL {
+        codexHome
+            .appendingPathComponent("codex-autofocus", isDirectory: true)
+            .appendingPathComponent("state.json")
+    }
+
+    public var defaultComputerUseNotify: NotifyCommand {
+        NotifyCommand(
+            executable: codexHome
+                .appendingPathComponent("computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient")
+                .path,
+            arguments: ["turn-ended"]
+        )
+    }
+
+    public func installedNotify(binaryPath: String) -> NotifyCommand {
+        NotifyCommand(executable: binaryPath, arguments: ["turn-ended"])
+    }
+
+    public func managedHookCommand(binaryPath: String) -> String {
+        "\(quoteCommandPath(binaryPath)) --hook \(Self.managedMarker)"
+    }
+
+    public func handleHook() -> Int32 {
+        let state = (try? readState()) ?? State(enabled: true)
+        guard state.enabled else { return 0 }
+        return runProcess(executable: "/usr/bin/open", arguments: ["-b", codexBundleIdentifier])
+    }
+
+    public func install(binaryPath: String) throws -> InstallOutcome {
+        try FileManager.default.createDirectory(at: codexHome, withIntermediateDirectories: true)
+        let hookCommand = managedHookCommand(binaryPath: binaryPath)
+        let existingState = (try? readState()) ?? State(enabled: true)
+        let configBackup = try cleanUpLegacyNotify(binaryPath: binaryPath, state: existingState)
+
+        var hooksDocument = try loadHooksDocument()
+        hooksDocument.upsertManagedStopHook(
+            command: hookCommand,
+            marker: Self.managedMarker,
+            timeout: 30,
+            statusMessage: Self.hookStatusMessage
+        )
+        let hooksBackup = try writeHooksDocument(hooksDocument)
+
+        let state = State(
+            enabled: existingState.enabled,
+            installedAt: ISO8601DateFormatter().string(from: Date()),
+            hookCommand: hookCommand
+        )
+        try writeState(state)
+
+        return InstallOutcome(
+            changed: configBackup != nil || hooksBackup != nil,
+            configBackupPath: configBackup?.path,
+            hooksBackupPath: hooksBackup?.path,
+            hookCommand: hookCommand
+        )
+    }
+
+    public func uninstall(binaryPath: String) throws -> InstallOutcome {
+        let hookCommand = managedHookCommand(binaryPath: binaryPath)
+        var hooksDocument = try loadHooksDocument()
+        let removed = hooksDocument.removeManagedHooks(marker: Self.managedMarker)
+        let hooksBackup = removed ? try writeHooksDocument(hooksDocument) : nil
+
+        var state = (try? readState()) ?? State(enabled: false)
+        state.enabled = false
+        state.hookCommand = hookCommand
+        try writeState(state)
+
+        return InstallOutcome(
+            changed: removed,
+            configBackupPath: nil,
+            hooksBackupPath: hooksBackup?.path,
+            hookCommand: hookCommand
+        )
+    }
+
+    public func setEnabled(_ enabled: Bool, binaryPath: String) throws -> State {
+        var state = (try? readState()) ?? State(enabled: enabled)
+        state.enabled = enabled
+        state.hookCommand = managedHookCommand(binaryPath: binaryPath)
+        try writeState(state)
+        return state
+    }
+
+    public func status(binaryPath: String) throws -> Status {
+        let hookCommand = managedHookCommand(binaryPath: binaryPath)
+        let state = try? readState()
+        let hooksDocument = try loadHooksDocument()
+        let hookLocations = hooksDocument.managedStopHookLocations(marker: Self.managedMarker)
+        let registered = !hookLocations.isEmpty
+        let text = try String(contentsOf: configURL, encoding: .utf8)
+        let currentNotify = try CodexConfigDocument(text: text).topLevelNotify()
+
+        var issues: [String] = []
+        if !registered {
+            issues.append("Managed Stop hook is not registered.")
+        }
+        if currentNotify == installedNotify(binaryPath: binaryPath) {
+            issues.append("Legacy notify wrapper is still installed.")
+        }
+        if registered && !hasTrustState(for: hookLocations, configText: text) {
+            issues.append("Managed Stop hook is registered but may need Codex hook review before it runs.")
+        }
+
+        return Status(
+            enabled: state?.enabled ?? registered,
+            registered: registered,
+            currentNotify: currentNotify,
+            hookCommand: hookCommand,
+            issues: issues
+        )
+    }
+
+    private func hasTrustState(for hookLocations: [(groupIndex: Int, hookIndex: Int)], configText: String) -> Bool {
+        hookLocations.contains { location in
+            let key = "[hooks.state.\"\(hooksURL.path):stop:\(location.groupIndex):\(location.hookIndex)\"]"
+            return configText.contains(key)
+        }
+    }
+
+    private func cleanUpLegacyNotify(binaryPath: String, state: State) throws -> URL? {
+        let existingText = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
+        let document = CodexConfigDocument(text: existingText)
+        let currentNotify = try document.topLevelNotify()
+        let installed = installedNotify(binaryPath: binaryPath)
+
+        var nextText = document.settingFeature("hooks", to: true)
+        if currentNotify == installed {
+            if let previousNotify = state.previousNotify ?? fallbackNotifyForCleanup() {
+                nextText = CodexConfigDocument(text: nextText).replacingTopLevelNotify(with: previousNotify)
+            } else {
+                nextText = CodexConfigDocument(text: nextText).removingTopLevelNotify()
+            }
+        }
+
+        guard nextText != existingText else { return nil }
+        let backupURL = try backupFile(configURL, label: "config")
+        try nextText.write(to: configURL, atomically: true, encoding: .utf8)
+        return backupURL
+    }
+
+    private func fallbackNotifyForCleanup() -> NotifyCommand? {
+        FileManager.default.isExecutableFile(atPath: defaultComputerUseNotify.executable)
+            ? defaultComputerUseNotify
+            : nil
+    }
+
+    private func loadHooksDocument() throws -> CodexHooksDocument {
+        guard FileManager.default.fileExists(atPath: hooksURL.path) else {
+            return CodexHooksDocument()
+        }
+
+        do {
+            return try CodexHooksDocument(data: Data(contentsOf: hooksURL))
+        } catch {
+            _ = try? backupFile(hooksURL, label: "hooks.corrupt")
+            return CodexHooksDocument()
+        }
+    }
+
+    private func writeHooksDocument(_ hooksDocument: CodexHooksDocument) throws -> URL? {
+        let backupURL = FileManager.default.fileExists(atPath: hooksURL.path)
+            ? try backupFile(hooksURL, label: "hooks")
+            : nil
+        try FileManager.default.createDirectory(at: hooksURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try hooksDocument.data().write(to: hooksURL, options: .atomic)
+        return backupURL
+    }
+
+    private func backupFile(_ url: URL, label: String) throws -> URL {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let stamp = formatter.string(from: Date())
+        let fileManager = FileManager.default
+        var backupURL = url.deletingLastPathComponent().appendingPathComponent("\(url.lastPathComponent).bak-\(stamp)-codex-autofocus-\(label)")
+        var suffix = 1
+
+        while fileManager.fileExists(atPath: backupURL.path) {
+            backupURL = url.deletingLastPathComponent().appendingPathComponent("\(url.lastPathComponent).bak-\(stamp)-codex-autofocus-\(label)-\(suffix)")
+            suffix += 1
+        }
+
+        try FileManager.default.copyItem(at: url, to: backupURL)
+        return backupURL
+    }
+
+    private func writeState(_ state: State) throws {
+        let directory = stateURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let data = try JSONEncoder.prettySorted.encode(state)
+        try data.write(to: stateURL, options: .atomic)
+    }
+
+    private func readState() throws -> State {
+        let data = try Data(contentsOf: stateURL)
+        return try JSONDecoder().decode(State.self, from: data)
+    }
+
+    private func runProcess(executable: String, arguments: [String]) -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus
+        } catch {
+            return 127
+        }
+    }
+
+    private func quoteCommandPath(_ path: String) -> String {
+        "'\(path.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
+private extension JSONEncoder {
+    static var prettySorted: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return encoder
+    }
+}
