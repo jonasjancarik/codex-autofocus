@@ -9,12 +9,17 @@ let package = Package(
     ],
     products: [
         .executable(name: "codex-autofocus", targets: ["CodexAutofocus"]),
+        .executable(name: "CodexAutofocusMenuBar", targets: ["CodexAutofocusMenuBar"]),
         .library(name: "CodexAutofocusCore", targets: ["CodexAutofocusCore"])
     ],
     targets: [
         .target(name: "CodexAutofocusCore"),
         .executableTarget(
             name: "CodexAutofocus",
+            dependencies: ["CodexAutofocusCore"]
+        ),
+        .executableTarget(
+            name: "CodexAutofocusMenuBar",
             dependencies: ["CodexAutofocusCore"]
         ),
         .testTarget(

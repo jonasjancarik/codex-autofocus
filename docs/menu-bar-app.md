@@ -1,11 +1,11 @@
-# Menu Bar App Plan
+# Menu Bar App
 
 The menu bar app should stay thin. `CodexAutofocusCore` owns the behavior and the
 app only presents controls.
 
 ## Shape
 
-- SwiftUI `App` entry point with an `NSStatusItem` bridge.
+- SwiftUI `App` entry point with `MenuBarExtra`.
 - LSUIElement app bundle so there is no Dock icon.
 - One menu item that toggles autofocus on and off without editing Codex config.
 - Secondary menu items for Status, Register Hook, Remove Hook, Reveal Codex
@@ -16,7 +16,7 @@ app only presents controls.
 Enabled:
 
 1. Call `CodexAutofocus.setEnabled(true, binaryPath:)`.
-3. Refresh menu state from `CodexAutofocus.status(binaryPath:)`.
+2. Refresh menu state from `CodexAutofocus.status(binaryPath:)`.
 
 Disabled:
 

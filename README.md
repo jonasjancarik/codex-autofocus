@@ -66,6 +66,17 @@ swift test
 swift run codex-autofocus --help
 ```
 
+## Run Menu Bar App
+
+```sh
+script/build_and_run.sh
+```
+
+This stages `dist/Codex Autofocus.app` with `LSUIElement=true` and launches it as
+a menu-bar-only app. The bundle includes a helper copy in `Contents/Resources`,
+but the app prefers the stable installed helper at `~/.codex/bin/codex-autofocus`
+when it exists.
+
 ## Smoke Test
 
 ```sh
