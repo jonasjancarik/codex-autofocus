@@ -82,6 +82,39 @@ final class CodexConfigDocumentTests: XCTestCase {
         XCTAssertFalse(hooks.contains(CodexAutofocus.managedMarker))
     }
 
+    func testTrustInstalledHookWritesCodexTrustedHash() throws {
+        let fixture = try makeFixture(binaryPath: "/tmp/codex-autofocus")
+        try "model = \"gpt-5.5\"\n".write(to: fixture.app.configURL, atomically: true, encoding: .utf8)
+        _ = try fixture.app.install(binaryPath: fixture.binaryPath)
+
+        var status = try fixture.app.status(binaryPath: fixture.binaryPath)
+        XCTAssertTrue(status.issues.contains("Managed Stop hook is registered but may need Codex hook review before it runs."))
+
+        let outcome = try fixture.app.trustInstalledHook(binaryPath: fixture.binaryPath)
+
+        XCTAssertTrue(outcome.changed)
+        XCTAssertEqual(outcome.trustedHash, "sha256:7badca2bdb8f56873959bbdeeb8a4c3a66f3788686236eafcd820d8e65b09066")
+        XCTAssertEqual(outcome.hookStateKeys, [fixture.app.hooksURL.path + ":stop:0:0"])
+
+        let config = try String(contentsOf: fixture.app.configURL, encoding: .utf8)
+        XCTAssertTrue(config.contains("[hooks.state.\"" + fixture.app.hooksURL.path + ":stop:0:0\"]"))
+        XCTAssertTrue(config.contains("trusted_hash = \"sha256:7badca2bdb8f56873959bbdeeb8a4c3a66f3788686236eafcd820d8e65b09066\""))
+
+        status = try fixture.app.status(binaryPath: fixture.binaryPath)
+        XCTAssertFalse(status.issues.contains("Managed Stop hook is registered but may need Codex hook review before it runs."))
+    }
+
+    func testTrustInstalledHookIsNoopWhenAlreadyTrusted() throws {
+        let fixture = try makeFixture(binaryPath: "/tmp/codex-autofocus")
+        try "model = \"gpt-5.5\"\n".write(to: fixture.app.configURL, atomically: true, encoding: .utf8)
+        _ = try fixture.app.install(binaryPath: fixture.binaryPath)
+        _ = try fixture.app.trustInstalledHook(binaryPath: fixture.binaryPath)
+
+        let outcome = try fixture.app.trustInstalledHook(binaryPath: fixture.binaryPath)
+
+        XCTAssertFalse(outcome.changed)
+    }
+
     func testReadsTopLevelNotify() throws {
         let document = CodexConfigDocument(text: #"""
         model = "gpt-5.5"
@@ -138,13 +171,21 @@ final class CodexConfigDocumentTests: XCTestCase {
         XCTAssertEqual(try NotifyCommand.fromTomlArray(command.tomlArray), command)
     }
 
+    func testHookTrustedHashRoundTrips() {
+        let document = CodexConfigDocument(text: "model = \"gpt-5.5\"\n")
+        let key = #"/tmp/codex/hooks.json:stop:1:0"#
+        let updated = document.settingTrustedHash("sha256:abc123", forHookStateKey: key)
+
+        XCTAssertEqual(CodexConfigDocument(text: updated).trustedHash(forHookStateKey: key), "sha256:abc123")
+    }
+
     private struct Fixture {
         var root: URL
         var app: CodexAutofocus
         var binaryPath: String
     }
 
-    private func makeFixture() throws -> Fixture {
+    private func makeFixture(binaryPath explicitBinaryPath: String? = nil) throws -> Fixture {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("codex-autofocus-tests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -153,7 +194,7 @@ final class CodexConfigDocumentTests: XCTestCase {
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
 
         let app = CodexAutofocus(homeDirectory: root)
-        let binaryPath = codexHome.appendingPathComponent("bin/codex-autofocus").path
+        let binaryPath = explicitBinaryPath ?? codexHome.appendingPathComponent("bin/codex-autofocus").path
         return Fixture(root: root, app: app, binaryPath: binaryPath)
     }
 

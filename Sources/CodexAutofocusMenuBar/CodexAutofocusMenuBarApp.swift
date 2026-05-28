@@ -9,7 +9,8 @@ struct CodexAutofocusMenuBarApp: App {
             MenuBarContent(model: model)
                 .onAppear { model.refresh() }
         } label: {
-            Label("Codex Autofocus", systemImage: model.statusIconName)
+            Image(systemName: model.statusIconName)
+                .accessibilityLabel("Codex Autofocus")
         }
         .menuBarExtraStyle(.menu)
     }

@@ -8,8 +8,11 @@ app only presents controls.
 - SwiftUI `App` entry point with `MenuBarExtra`.
 - LSUIElement app bundle so there is no Dock icon.
 - One menu item that toggles autofocus on and off without editing Codex config.
-- Secondary menu items for Status, Register Hook, Remove Hook, Reveal Codex
-  Config, Reveal Codex Hooks, and Quit.
+- An icon-only menu bar item with the app name available through accessibility
+  and `Quit Codex Autofocus`.
+- Secondary repair/debug actions hidden under `Advanced`.
+- Status refreshes automatically while the app runs; there is no manual refresh
+  menu item.
 
 ## Toggle Flow
 
@@ -33,6 +36,17 @@ Remove Hook:
 
 1. Call `CodexAutofocus.uninstall(binaryPath:)`.
 2. Refresh menu state.
+
+Trust Installed Hook:
+
+1. Show a warning confirmation explaining that this bypasses Codex's normal hook
+   review UI.
+2. If confirmed, call `CodexAutofocus.trustInstalledHook(binaryPath:)`.
+3. Refresh menu state.
+
+This action is intentionally under `Advanced` and is never part of automatic
+install or repair. Normal installs should let Codex ask the user to review new or
+modified hooks.
 
 ## Packaging Notes
 

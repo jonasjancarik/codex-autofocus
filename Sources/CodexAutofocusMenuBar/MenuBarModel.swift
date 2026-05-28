@@ -14,6 +14,23 @@ final class MenuBarModel: ObservableObject {
     @Published private(set) var lastErrorMessage: String?
 
     private let autofocus = CodexAutofocus()
+    private var refreshTask: Task<Void, Never>?
+
+    init() {
+        refresh()
+        refreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                await MainActor.run {
+                    self?.refresh()
+                }
+            }
+        }
+    }
+
+    deinit {
+        refreshTask?.cancel()
+    }
 
     private var helperPath: String {
         let installedHelper = autofocus.codexHome.appendingPathComponent("bin/codex-autofocus").path
@@ -29,15 +46,12 @@ final class MenuBarModel: ObservableObject {
         return installedHelper
     }
 
-    var statusTitle: String {
+    var statusSummary: String {
         if !status.registered {
             return "Not Registered"
         }
-        return status.enabled ? "Enabled" : "Disabled"
-    }
-
-    var statusDetail: String {
-        status.registered ? "Stop hook installed" : "Stop hook missing"
+        let behavior = status.enabled ? "On" : "Off"
+        return "\(behavior) · Hook installed"
     }
 
     var statusIconName: String {
@@ -49,6 +63,15 @@ final class MenuBarModel: ObservableObject {
 
     var shortIssue: String? {
         guard let issue = status.issues.first else { return nil }
+        if issue == "Managed Stop hook is not registered." {
+            return "Hook not installed"
+        }
+        if issue == "Legacy notify wrapper is still installed." {
+            return "Legacy notify cleanup needed"
+        }
+        if issue == "Managed Stop hook is registered but may need Codex hook review before it runs." {
+            return "Approve hook in Codex"
+        }
         return issue.count <= 30 ? issue : String(issue.prefix(27)) + "..."
     }
 
@@ -85,6 +108,16 @@ final class MenuBarModel: ObservableObject {
         }
     }
 
+    func trustInstalledHook() {
+        guard confirmTrustInstalledHook() else { return }
+        do {
+            _ = try autofocus.trustInstalledHook(binaryPath: helperPath)
+            refresh()
+        } catch {
+            lastErrorMessage = String(describing: error)
+        }
+    }
+
     func removeHook() {
         do {
             _ = try autofocus.uninstall(binaryPath: helperPath)
@@ -104,5 +137,15 @@ final class MenuBarModel: ObservableObject {
 
     private func reveal(_ url: URL) {
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    private func confirmTrustInstalledHook() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Trust Installed Hook?"
+        alert.informativeText = "This writes Codex's hook trust record directly to config.toml and bypasses Codex's normal hook review prompt. Only continue if you trust the installed Codex Autofocus hook."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Trust Hook")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 }

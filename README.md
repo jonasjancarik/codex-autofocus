@@ -1,101 +1,135 @@
 # codex-autofocus
 
-Bring the Codex desktop app to the front when a Codex turn ends.
+`codex-autofocus` is a small macOS utility that brings the Codex desktop app to
+the front when a Codex turn finishes.
 
-This starts as a small SwiftPM command-line utility. The core install/uninstall
-logic is in a library target so a future menu bar app can toggle the same setting
-without reimplementing Codex hook management.
+It has two parts:
 
-## Install
+- a command-line helper that Codex runs from a `Stop` hook
+- a menu bar app for turning the behavior on or off and repairing the hook setup
 
-```sh
-scripts/install.sh
-```
-
-The installer:
-
-1. builds `codex-autofocus` in release mode,
-2. copies it to `~/.codex/bin/codex-autofocus`,
-3. registers a managed `Stop` hook in `~/.codex/hooks.json`,
-4. enables `features.hooks` in `~/.codex/config.toml` if needed,
-5. migrates away from the earlier experimental `notify = codex-autofocus` wrapper
-   if it finds one.
-
-The hook command is marked so it can coexist with other Codex hooks:
-
-```sh
-'/Users/janca/.codex/bin/codex-autofocus' --hook --managed-by codex-autofocus
-```
-
-When Codex invokes the hook, `codex-autofocus` checks its runtime state. If it is
-enabled, it runs:
+The helper is intentionally narrow. It does not read your Codex transcript, send
+network requests, or control other apps. When it is enabled, it runs:
 
 ```sh
 /usr/bin/open -b com.openai.codex
 ```
 
-## Enable / Disable
+## Requirements
 
-These commands only flip runtime state. They do not edit Codex config or hooks.
+- macOS 13 or newer
+- Swift 5.9 or newer for building from source
+- Codex hooks enabled in Codex
+
+## Install
+
+From the project directory:
+
+```sh
+scripts/install.sh
+```
+
+The installer builds the helper, copies it to `~/.codex/bin/codex-autofocus`,
+and registers a managed `Stop` hook in `~/.codex/hooks.json`.
+
+The installed hook looks like this:
+
+```sh
+'/Users/janca/.codex/bin/codex-autofocus' --hook --managed-by codex-autofocus
+```
+
+The `--managed-by codex-autofocus` marker is important. It lets this project find
+and update only its own hook while leaving hooks from other tools alone.
+
+If an older experimental `notify = codex-autofocus` setup is present, the
+installer migrates away from it and restores the previous notifier when it can.
+
+## Approve The Hook
+
+Codex asks you to review new or changed hooks before it runs them. That is a
+security step: hooks can run outside the sandbox.
+
+After installing, open Codex's hook review UI and trust the Codex Autofocus
+`Stop` hook. The menu bar app shows `Approve hook in Codex` until Codex has
+recorded that trust.
+
+There is also an advanced escape hatch: `Advanced > Trust Installed Hook...`.
+That action writes the same `trusted_hash` entry Codex would write into
+`~/.codex/config.toml`, but only after a confirmation prompt. It is not used
+automatically because normal installs should leave hook approval to Codex.
+
+## Run The Menu Bar App
+
+```sh
+script/build_and_run.sh
+```
+
+This builds `dist/Codex Autofocus.app` and launches it as a menu-bar-only app.
+The app has no Dock icon.
+
+The menu is intentionally small:
+
+- current state, such as `On · Hook installed`
+- `Turn Autofocus On` or `Turn Autofocus Off`
+- `Advanced` repair and file actions
+- `Quit Codex Autofocus`
+
+Status refreshes automatically while the app is running. There is no manual
+refresh command.
+
+## Turn Autofocus On Or Off
+
+The menu bar app is the easiest way to toggle autofocus.
+
+The command-line helper can do the same thing:
 
 ```sh
 ~/.codex/bin/codex-autofocus enable --binary ~/.codex/bin/codex-autofocus
 ~/.codex/bin/codex-autofocus disable --binary ~/.codex/bin/codex-autofocus
 ```
 
-## Uninstall Hook
+Enable and disable only change Codex Autofocus runtime state. They do not edit
+`~/.codex/hooks.json` or `~/.codex/config.toml`.
+
+## Check Status
+
+```sh
+~/.codex/bin/codex-autofocus status --binary ~/.codex/bin/codex-autofocus
+```
+
+Status reports whether autofocus is enabled, whether the managed hook is
+registered, which hook command is installed, and whether any setup issue needs
+attention.
+
+## Uninstall The Hook
 
 ```sh
 scripts/uninstall.sh
 ```
 
 This removes only hooks marked `--managed-by codex-autofocus` from
-`~/.codex/hooks.json`. It does not touch unrelated hooks.
-
-## Status
-
-```sh
-~/.codex/bin/codex-autofocus status --binary ~/.codex/bin/codex-autofocus
-```
+`~/.codex/hooks.json`. It does not remove unrelated hooks.
 
 ## Development
+
+Useful commands:
 
 ```sh
 swift build
 swift test
 swift run codex-autofocus --help
-```
-
-## Run Menu Bar App
-
-```sh
-script/build_and_run.sh
-```
-
-This stages `dist/Codex Autofocus.app` with `LSUIElement=true` and launches it as
-a menu-bar-only app. The bundle includes a helper copy in `Contents/Resources`,
-but the app prefers the stable installed helper at `~/.codex/bin/codex-autofocus`
-when it exists.
-
-## Smoke Test
-
-```sh
 scripts/smoke.sh
 ```
 
-The smoke test removes and re-registers the managed hook, verifies
-`~/.codex/config.toml` no longer points `notify` at `codex-autofocus`, flips the
-runtime enabled flag off and on, and runs dummy hook invocations. It leaves the
-hook registered and autofocus enabled.
+`scripts/smoke.sh` removes and re-registers the managed hook, verifies that the
+legacy `notify` setup is not active, toggles autofocus off and on, and runs dummy
+hook invocations. It leaves the hook registered and autofocus enabled.
 
-## Future Menu Bar App
+Project layout:
 
-The intended next product is a tiny macOS menu bar app with:
+- `Sources/CodexAutofocusCore`: shared install, hook, status, and trust logic
+- `Sources/CodexAutofocus`: command-line helper
+- `Sources/CodexAutofocusMenuBar`: macOS menu bar app
+- `Tests/CodexAutofocusCoreTests`: regression tests
+- `docs/menu-bar-app.md`: notes on the menu bar app behavior
 
-- an Enabled/Disabled toggle backed by `CodexAutofocusCore.setEnabled`,
-- a status item icon that reflects hook registration and runtime state,
-- a “Reveal Config” command for `~/.codex/config.toml`,
-- a “Reveal Hooks” command for `~/.codex/hooks.json`,
-- LSUIElement packaging so it lives only in the menu bar.
-
-See [docs/menu-bar-app.md](docs/menu-bar-app.md).

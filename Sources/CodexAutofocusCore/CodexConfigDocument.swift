@@ -63,6 +63,49 @@ public struct CodexConfigDocument: Sendable {
         return lines.joined(separator: "\n")
     }
 
+    public func trustedHash(forHookStateKey key: String) -> String? {
+        let lines = text.components(separatedBy: "\n")
+        guard let sectionIndex = hookStateSectionIndex(for: key, in: lines) else {
+            return nil
+        }
+
+        let blockEnd = sectionEndIndex(startingAt: sectionIndex, in: lines)
+        for index in sectionIndex + 1..<blockEnd {
+            guard self.key(in: lines[index]) == "trusted_hash",
+                  let equals = lines[index].firstIndex(of: "=") else {
+                continue
+            }
+            let valueStart = lines[index].index(after: equals)
+            return parseTomlBasicString(String(lines[index][valueStart...]).trimmingCharacters(in: .whitespaces))
+        }
+
+        return nil
+    }
+
+    public func settingTrustedHash(_ trustedHash: String, forHookStateKey key: String) -> String {
+        var lines = text.components(separatedBy: "\n")
+        let sectionHeader = hookStateSectionHeader(for: key)
+        let replacement = "trusted_hash = \(tomlBasicString(trustedHash))"
+
+        if let sectionIndex = hookStateSectionIndex(for: key, in: lines) {
+            let blockEnd = sectionEndIndex(startingAt: sectionIndex, in: lines)
+            if let hashIndex = (sectionIndex + 1..<blockEnd).first(where: { self.key(in: lines[$0]) == "trusted_hash" }) {
+                lines[hashIndex] = replacement
+            } else {
+                lines.insert(replacement, at: blockEnd)
+            }
+            return lines.joined(separator: "\n")
+        }
+
+        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           lines.last?.isEmpty == false {
+            lines.append("")
+        }
+        lines.append(sectionHeader)
+        lines.append(replacement)
+        return lines.joined(separator: "\n")
+    }
+
     private func topLevelLines() -> [String] {
         let lines = text.components(separatedBy: "\n")
         return topLevelLineRange(in: lines).map { lines[$0] }
@@ -94,6 +137,17 @@ public struct CodexConfigDocument: Sendable {
         return lines.count
     }
 
+    private func hookStateSectionIndex(for key: String, in lines: [String]) -> Int? {
+        let header = hookStateSectionHeader(for: key)
+        return lines.firstIndex { line in
+            line.trimmingCharacters(in: .whitespaces) == header
+        }
+    }
+
+    private func hookStateSectionHeader(for key: String) -> String {
+        "[hooks.state.\(tomlBasicString(key))]"
+    }
+
     private func notifyValue(in line: String) -> String? {
         guard key(in: line) == "notify", let equals = line.firstIndex(of: "=") else {
             return nil
@@ -106,5 +160,41 @@ public struct CodexConfigDocument: Sendable {
         let stripped = line.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0]
         guard let equals = stripped.firstIndex(of: "=") else { return nil }
         return stripped[..<equals].trimmingCharacters(in: .whitespaces)
+    }
+
+    private func tomlBasicString(_ value: String) -> String {
+        let escaped = value.map { character -> String in
+            switch character {
+            case "\\": return "\\\\"
+            case "\"": return "\\\""
+            case "\n": return "\\n"
+            case "\r": return "\\r"
+            case "\t": return "\\t"
+            default: return String(character)
+            }
+        }.joined()
+        return "\"\(escaped)\""
+    }
+
+    private func parseTomlBasicString(_ value: String) -> String? {
+        guard value.hasPrefix("\""), value.hasSuffix("\"") else { return nil }
+        var result = ""
+        var iterator = value.dropFirst().dropLast().makeIterator()
+        while let character = iterator.next() {
+            guard character == "\\" else {
+                result.append(character)
+                continue
+            }
+            guard let escaped = iterator.next() else { return nil }
+            switch escaped {
+            case "\\": result.append("\\")
+            case "\"": result.append("\"")
+            case "n": result.append("\n")
+            case "r": result.append("\r")
+            case "t": result.append("\t")
+            default: return nil
+            }
+        }
+        return result
     }
 }

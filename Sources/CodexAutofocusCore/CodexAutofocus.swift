@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public struct CodexAutofocus: Sendable {
@@ -14,6 +15,13 @@ public struct CodexAutofocus: Sendable {
         public var currentNotify: NotifyCommand?
         public var hookCommand: String
         public var issues: [String]
+    }
+
+    public struct TrustOutcome: Sendable {
+        public var changed: Bool
+        public var configBackupPath: String?
+        public var trustedHash: String
+        public var hookStateKeys: [String]
     }
 
     public struct State: Codable, Sendable {
@@ -167,6 +175,44 @@ public struct CodexAutofocus: Sendable {
         return state
     }
 
+    public func trustInstalledHook(binaryPath: String) throws -> TrustOutcome {
+        let hookCommand = managedHookCommand(binaryPath: binaryPath)
+        let hooksDocument = try loadHooksDocument()
+        let hookLocations = hooksDocument.managedStopHookLocations(marker: Self.managedMarker)
+        guard !hookLocations.isEmpty else {
+            throw CodexAutofocusError.missingManagedHook
+        }
+
+        let trustedHash = managedStopHookTrustedHash(command: hookCommand)
+        let hookStateKeys = hookLocations.map { hookStateKey(forStopHookAt: $0) }
+        let existingText = (try? String(contentsOf: configURL, encoding: .utf8)) ?? ""
+        var nextText = existingText
+
+        for key in hookStateKeys {
+            let document = CodexConfigDocument(text: nextText)
+            guard document.trustedHash(forHookStateKey: key) != trustedHash else { continue }
+            nextText = document.settingTrustedHash(trustedHash, forHookStateKey: key)
+        }
+
+        let backupURL: URL?
+        if nextText != existingText {
+            backupURL = FileManager.default.fileExists(atPath: configURL.path)
+                ? try backupFile(configURL, label: "config.trust")
+                : nil
+            try FileManager.default.createDirectory(at: configURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try nextText.write(to: configURL, atomically: true, encoding: .utf8)
+        } else {
+            backupURL = nil
+        }
+
+        return TrustOutcome(
+            changed: nextText != existingText,
+            configBackupPath: backupURL?.path,
+            trustedHash: trustedHash,
+            hookStateKeys: hookStateKeys
+        )
+    }
+
     public func status(binaryPath: String) throws -> Status {
         let hookCommand = managedHookCommand(binaryPath: binaryPath)
         let state = try? readState()
@@ -183,7 +229,7 @@ public struct CodexAutofocus: Sendable {
         if currentNotify == installedNotify(binaryPath: binaryPath) {
             issues.append("Legacy notify wrapper is still installed.")
         }
-        if registered && !hasTrustState(for: hookLocations, configText: text) {
+        if registered && !hasTrustState(for: hookLocations, hookCommand: hookCommand, configText: text) {
             issues.append("Managed Stop hook is registered but may need Codex hook review before it runs.")
         }
 
@@ -196,11 +242,40 @@ public struct CodexAutofocus: Sendable {
         )
     }
 
-    private func hasTrustState(for hookLocations: [(groupIndex: Int, hookIndex: Int)], configText: String) -> Bool {
-        hookLocations.contains { location in
-            let key = "[hooks.state.\"\(hooksURL.path):stop:\(location.groupIndex):\(location.hookIndex)\"]"
-            return configText.contains(key)
+    private func hasTrustState(
+        for hookLocations: [(groupIndex: Int, hookIndex: Int)],
+        hookCommand: String,
+        configText: String
+    ) -> Bool {
+        let trustedHash = managedStopHookTrustedHash(command: hookCommand)
+        let document = CodexConfigDocument(text: configText)
+        return hookLocations.contains { location in
+            document.trustedHash(forHookStateKey: hookStateKey(forStopHookAt: location)) == trustedHash
         }
+    }
+
+    private func hookStateKey(forStopHookAt location: (groupIndex: Int, hookIndex: Int)) -> String {
+        "\(hooksURL.path):stop:\(location.groupIndex):\(location.hookIndex)"
+    }
+
+    private func managedStopHookTrustedHash(command: String) -> String {
+        let identity: [String: Any] = [
+            "event_name": "stop",
+            "hooks": [[
+                "async": false,
+                "command": command,
+                "statusMessage": Self.hookStatusMessage,
+                "timeout": 30,
+                "type": "command",
+            ]],
+        ]
+        let data = (try? JSONSerialization.data(
+            withJSONObject: identity,
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        )) ?? Data()
+        let digest = SHA256.hash(data: data)
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "sha256:\(hex)"
     }
 
     private func cleanUpLegacyNotify(binaryPath: String, state: State) throws -> URL? {

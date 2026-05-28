@@ -6,8 +6,7 @@ struct MenuBarContent: View {
 
     var body: some View {
         Group {
-            Text(model.statusTitle)
-            Text(model.statusDetail)
+            Text(model.statusSummary)
                 .foregroundStyle(.secondary)
 
             if let issue = model.shortIssue {
@@ -17,32 +16,35 @@ struct MenuBarContent: View {
 
             Divider()
 
-            Button(model.status.enabled ? "Disable" : "Enable") {
+            Button(model.status.enabled ? "Turn Autofocus Off" : "Turn Autofocus On") {
                 model.setEnabled(!model.status.enabled)
             }
             .disabled(!model.status.registered)
 
-            Button(model.status.registered ? "Register Again" : "Register Hook") {
-                model.registerHook()
-            }
+            Menu("Advanced") {
+                Button(model.status.registered ? "Repair Codex Hook" : "Install Codex Hook") {
+                    model.registerHook()
+                }
 
-            Button("Remove Hook") {
-                model.removeHook()
-            }
-            .disabled(!model.status.registered)
+                Button("Trust Installed Hook...") {
+                    model.trustInstalledHook()
+                }
+                .disabled(!model.status.registered)
 
-            Divider()
+                Button("Remove Codex Hook...") {
+                    model.removeHook()
+                }
+                .disabled(!model.status.registered)
 
-            Button("Refresh") {
-                model.refresh()
-            }
+                Divider()
 
-            Button("Reveal Config") {
-                model.revealConfig()
-            }
+                Button("Show config.toml") {
+                    model.revealConfig()
+                }
 
-            Button("Reveal Hooks") {
-                model.revealHooks()
+                Button("Show hooks.json") {
+                    model.revealHooks()
+                }
             }
 
             if let message = model.lastErrorMessage {
@@ -57,7 +59,7 @@ struct MenuBarContent: View {
 
             Divider()
 
-            Button("Quit") {
+            Button("Quit Codex Autofocus") {
                 NSApplication.shared.terminate(nil)
             }
         }
