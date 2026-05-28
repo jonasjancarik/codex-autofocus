@@ -34,6 +34,8 @@ final class MenuBarModel: ObservableObject {
 
     private var helperPath: String {
         for homebrewPath in [
+            "/opt/homebrew/opt/codex-autofocus/bin/codex-autofocus",
+            "/usr/local/opt/codex-autofocus/bin/codex-autofocus",
             "/opt/homebrew/bin/codex-autofocus",
             "/usr/local/bin/codex-autofocus",
         ] where FileManager.default.isExecutableFile(atPath: homebrewPath) {

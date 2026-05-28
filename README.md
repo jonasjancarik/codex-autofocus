@@ -30,7 +30,7 @@ Homebrew is the easiest install path once the tap is available:
 ```sh
 brew tap jonasjancarik/tap
 brew install codex-autofocus
-codex-autofocus install --binary "$(brew --prefix)/bin/codex-autofocus"
+codex-autofocus install --binary "$(brew --prefix codex-autofocus)/bin/codex-autofocus"
 ```
 
 Start the menu bar app with:
