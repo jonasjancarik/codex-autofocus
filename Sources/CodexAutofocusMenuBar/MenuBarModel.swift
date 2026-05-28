@@ -33,6 +33,13 @@ final class MenuBarModel: ObservableObject {
     }
 
     private var helperPath: String {
+        for homebrewPath in [
+            "/opt/homebrew/bin/codex-autofocus",
+            "/usr/local/bin/codex-autofocus",
+        ] where FileManager.default.isExecutableFile(atPath: homebrewPath) {
+            return homebrewPath
+        }
+
         let installedHelper = autofocus.codexHome.appendingPathComponent("bin/codex-autofocus").path
         if FileManager.default.isExecutableFile(atPath: installedHelper) {
             return installedHelper

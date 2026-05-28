@@ -23,6 +23,28 @@ network requests, or control other apps. When it is enabled, it runs:
 
 ## Install
 
+### Homebrew
+
+Homebrew is the easiest install path once the tap is available:
+
+```sh
+brew tap jonasjancarik/tap
+brew install codex-autofocus
+codex-autofocus install --binary "$(brew --prefix)/bin/codex-autofocus"
+```
+
+Start the menu bar app with:
+
+```sh
+codex-autofocus-menu
+```
+
+The first command installs the helper and menu app. The `codex-autofocus install`
+command registers the Codex hook. Codex may still ask you to approve that hook
+before it runs.
+
+### From Source
+
 From the project directory:
 
 ```sh
@@ -53,10 +75,11 @@ After installing, open Codex's hook review UI and trust the Codex Autofocus
 `Stop` hook. The menu bar app shows `Approve hook in Codex` until Codex has
 recorded that trust.
 
-There is also an advanced escape hatch: `Advanced > Trust Installed Hook...`.
-That action writes the same `trusted_hash` entry Codex would write into
-`~/.codex/config.toml`, but only after a confirmation prompt. It is not used
-automatically because normal installs should leave hook approval to Codex.
+There is also a manual option: `Advanced > Trust Installed Hook...`.
+Use it only if you want Codex Autofocus to write the hook approval record directly
+to `~/.codex/config.toml` instead of approving the hook through Codex's normal
+review UI. The app shows a confirmation prompt first, and this is never done
+automatically.
 
 ## Run The Menu Bar App
 
@@ -66,6 +89,12 @@ script/build_and_run.sh
 
 This builds `dist/Codex Autofocus.app` and launches it as a menu-bar-only app.
 The app has no Dock icon.
+
+The bundle can also be built without launching it:
+
+```sh
+script/package_app.sh --configuration release
+```
 
 The menu is intentionally small:
 
@@ -132,4 +161,3 @@ Project layout:
 - `Sources/CodexAutofocusMenuBar`: macOS menu bar app
 - `Tests/CodexAutofocusCoreTests`: regression tests
 - `docs/menu-bar-app.md`: notes on the menu bar app behavior
-
