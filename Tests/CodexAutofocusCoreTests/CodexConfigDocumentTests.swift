@@ -179,6 +179,74 @@ final class CodexConfigDocumentTests: XCTestCase {
         XCTAssertEqual(CodexConfigDocument(text: updated).trustedHash(forHookStateKey: key), "sha256:abc123")
     }
 
+    func testDelayedFocusCommandRunsAfterStopHookReturns() {
+        let app = CodexAutofocus(
+            homeDirectory: URL(fileURLWithPath: "/tmp/codex-autofocus-tests"),
+            codexBundleIdentifier: "com.example.Codex App"
+        )
+
+        let command = app.delayedFocusShellCommand(delaySeconds: 1.25, hookID: "hook-1")
+
+        XCTAssertTrue(command.contains("sleep 1.25;"))
+        XCTAssertTrue(command.contains("focus firing hook_id=%s"))
+        XCTAssertTrue(command.contains("/usr/bin/open -b 'com.example.Codex App'"))
+        XCTAssertTrue(command.contains("focus open_exit=%s hook_id=%s"))
+    }
+
+    func testDelayedFocusCommandQuotesBundleIdentifier() {
+        let app = CodexAutofocus(
+            homeDirectory: URL(fileURLWithPath: "/tmp/codex-autofocus-tests"),
+            codexBundleIdentifier: "com.example.Codex'App"
+        )
+
+        XCTAssertTrue(
+            app.delayedFocusShellCommand(delaySeconds: 0.5, hookID: "hook'1")
+                .contains("/usr/bin/open -b 'com.example.Codex'\\''App'")
+        )
+    }
+
+    func testHookDebugSummaryRedactsPromptContent() throws {
+        let app = CodexAutofocus(homeDirectory: URL(fileURLWithPath: "/tmp/codex-autofocus-tests"))
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "hook_event_name": "Stop",
+            "thread_id": "thread-1",
+            "turn_id": "turn-1",
+            "source": "vscode",
+            "prompt": "private prompt",
+            "last_assistant_message": "private answer",
+        ], options: [.sortedKeys])
+
+        let summary = app.hookDebugSummary(inputData: payload)
+
+        XCTAssertTrue(summary.contains("payload=json"))
+        XCTAssertTrue(summary.contains("hook_event_name='Stop'"))
+        XCTAssertTrue(summary.contains("thread_id='thread-1'"))
+        XCTAssertTrue(summary.contains("turn_id='turn-1'"))
+        XCTAssertTrue(summary.contains("source='vscode'"))
+        XCTAssertFalse(summary.contains("private prompt"))
+        XCTAssertFalse(summary.contains("private answer"))
+        XCTAssertFalse(summary.contains("prompt"))
+        XCTAssertFalse(summary.contains("last_assistant_message"))
+    }
+
+    func testDisabledHookWritesDebugLogWithoutSchedulingFocus() throws {
+        let fixture = try makeFixture()
+        try writeState(CodexAutofocus.State(enabled: false), app: fixture.app)
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "hook_event_name": "Stop",
+            "thread_id": "thread-1",
+        ], options: [.sortedKeys])
+
+        XCTAssertEqual(fixture.app.handleHook(inputData: payload), 0)
+
+        let log = try String(contentsOf: fixture.app.debugLogURL, encoding: .utf8)
+        XCTAssertTrue(log.contains("hook received enabled=false"))
+        XCTAssertTrue(log.contains("hook_event_name='Stop'"))
+        XCTAssertTrue(log.contains("thread_id='thread-1'"))
+        XCTAssertTrue(log.contains("autofocus skipped reason=disabled"))
+        XCTAssertFalse(log.contains("focus schedule_exit"))
+    }
+
     private struct Fixture {
         var root: URL
         var app: CodexAutofocus

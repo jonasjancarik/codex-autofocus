@@ -33,7 +33,8 @@ func describe(_ command: NotifyCommand?) -> String {
 do {
     switch arguments.first {
     case "--hook":
-        exit(app.handleHook())
+        let inputData = FileHandle.standardInput.readDataToEndOfFile()
+        exit(app.handleHook(inputData: inputData))
 
     case "install":
         let outcome = try app.install(binaryPath: binaryPath(from: arguments))

@@ -65,6 +65,7 @@ public struct CodexAutofocus: Sendable {
 
     public static let managedMarker = "--managed-by codex-autofocus"
     public static let hookStatusMessage = "Codex Autofocus is bringing Codex forward"
+    public static let defaultFocusDelaySeconds = 1.0
 
     public var homeDirectory: URL
     public var codexBundleIdentifier: String
@@ -95,6 +96,10 @@ public struct CodexAutofocus: Sendable {
             .appendingPathComponent("state.json")
     }
 
+    public var debugLogURL: URL {
+        stateURL.deletingLastPathComponent().appendingPathComponent("debug.log")
+    }
+
     public var defaultComputerUseNotify: NotifyCommand {
         NotifyCommand(
             executable: codexHome
@@ -112,10 +117,31 @@ public struct CodexAutofocus: Sendable {
         "\(quoteCommandPath(binaryPath)) --hook \(Self.managedMarker)"
     }
 
-    public func handleHook() -> Int32 {
+    public func handleHook(inputData: Data = Data()) -> Int32 {
         let state = (try? readState()) ?? State(enabled: true)
-        guard state.enabled else { return 0 }
-        return runProcess(executable: "/usr/bin/open", arguments: ["-b", codexBundleIdentifier])
+        let hookID = UUID().uuidString
+        appendDebugLog("hook_id=\(hookID) hook received enabled=\(state.enabled) \(hookDebugSummary(inputData: inputData))")
+
+        guard state.enabled else {
+            appendDebugLog("hook_id=\(hookID) autofocus skipped reason=disabled")
+            return 0
+        }
+
+        let status = scheduleFocusAfterHookReturns(hookID: hookID)
+        appendDebugLog("hook_id=\(hookID) focus schedule_exit=\(status)")
+        return status
+    }
+
+    func delayedFocusShellCommand(
+        delaySeconds: Double = Self.defaultFocusDelaySeconds,
+        hookID: String = "unknown"
+    ) -> String {
+        let delay = String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), delaySeconds)
+        let logPath = quoteCommandPath(debugLogURL.path)
+        let hookID = shellScalar(hookID)
+        return """
+        sleep \(delay); printf '%s focus firing hook_id=%s\\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \(hookID) >> \(logPath); /usr/bin/open -b \(quoteCommandPath(codexBundleIdentifier)) >/dev/null 2>&1; status=$?; printf '%s focus open_exit=%s hook_id=%s\\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$status" \(hookID) >> \(logPath); exit "$status"
+        """
     }
 
     public func install(binaryPath: String) throws -> InstallOutcome {
@@ -357,14 +383,55 @@ public struct CodexAutofocus: Sendable {
         return try JSONDecoder().decode(State.self, from: data)
     }
 
-    private func runProcess(executable: String, arguments: [String]) -> Int32 {
+    func hookDebugSummary(inputData: Data) -> String {
+        var parts = ["payload_bytes=\(inputData.count)"]
+        guard !inputData.isEmpty else {
+            parts.append("payload=empty")
+            return parts.joined(separator: " ")
+        }
+
+        guard
+            let object = try? JSONSerialization.jsonObject(with: inputData),
+            let dictionary = object as? [String: Any]
+        else {
+            parts.append("payload=unparsed")
+            return parts.joined(separator: " ")
+        }
+
+        parts.append("payload=json")
+        for key in [
+            "hook_event_name",
+            "event_name",
+            "thread_id",
+            "turn_id",
+            "session_id",
+            "source",
+            "agent_type",
+            "transcript_path",
+            "agent_transcript_path",
+            "permission_mode",
+        ] {
+            if let value = dictionary[key] {
+                parts.append("\(key)=\(logValue(value))")
+            }
+        }
+
+        let redactedKeys: Set<String> = ["prompt", "last_assistant_message"]
+        let keys = dictionary.keys
+            .filter { !redactedKeys.contains($0) }
+            .sorted()
+            .joined(separator: ",")
+        parts.append("payload_keys=\(shellScalar(keys))")
+        return parts.joined(separator: " ")
+    }
+
+    private func scheduleFocusAfterHookReturns(hookID: String) -> Int32 {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", delayedFocusShellCommand(hookID: hookID)]
         do {
             try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus
+            return 0
         } catch {
             return 127
         }
@@ -372,6 +439,51 @@ public struct CodexAutofocus: Sendable {
 
     private func quoteCommandPath(_ path: String) -> String {
         "'\(path.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    private func appendDebugLog(_ message: String) {
+        do {
+            try FileManager.default.createDirectory(at: debugLogURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let line = "\(Self.iso8601UTC(Date())) \(message)\n"
+            let data = Data(line.utf8)
+            if FileManager.default.fileExists(atPath: debugLogURL.path) {
+                let handle = try FileHandle(forWritingTo: debugLogURL)
+                try handle.seekToEnd()
+                try handle.write(contentsOf: data)
+                try handle.close()
+            } else {
+                try data.write(to: debugLogURL, options: .atomic)
+            }
+        } catch {
+            // Hook logging must never prevent Codex from finishing its turn.
+        }
+    }
+
+    private func logValue(_ value: Any) -> String {
+        if let string = value as? String {
+            return shellScalar(string)
+        }
+        if let number = value as? NSNumber {
+            return shellScalar(number.stringValue)
+        }
+        if JSONSerialization.isValidJSONObject(value),
+           let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes]),
+           let string = String(data: data, encoding: .utf8)
+        {
+            return shellScalar(string)
+        }
+        return shellScalar(String(describing: value))
+    }
+
+    private func shellScalar(_ value: String) -> String {
+        quoteCommandPath(value.replacingOccurrences(of: "\n", with: "\\n"))
+    }
+
+    private static func iso8601UTC(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: date)
     }
 }
 
