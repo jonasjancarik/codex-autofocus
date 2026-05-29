@@ -65,7 +65,6 @@ public struct CodexAutofocus: Sendable {
 
     public static let managedMarker = "--managed-by codex-autofocus"
     public static let hookStatusMessage = "Codex Autofocus is bringing Codex forward"
-    public static let defaultFocusDelaySeconds = 1.0
 
     public var homeDirectory: URL
     public var codexBundleIdentifier: String
@@ -127,21 +126,10 @@ public struct CodexAutofocus: Sendable {
             return 0
         }
 
-        let status = scheduleFocusAfterHookReturns(hookID: hookID)
-        appendDebugLog("hook_id=\(hookID) focus schedule_exit=\(status)")
+        appendDebugLog("hook_id=\(hookID) focus starting")
+        let status = runProcess(executable: "/usr/bin/open", arguments: ["-b", codexBundleIdentifier])
+        appendDebugLog("hook_id=\(hookID) focus open_exit=\(status)")
         return status
-    }
-
-    func delayedFocusShellCommand(
-        delaySeconds: Double = Self.defaultFocusDelaySeconds,
-        hookID: String = "unknown"
-    ) -> String {
-        let delay = String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), delaySeconds)
-        let logPath = quoteCommandPath(debugLogURL.path)
-        let hookID = shellScalar(hookID)
-        return """
-        sleep \(delay); printf '%s focus firing hook_id=%s\\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \(hookID) >> \(logPath); /usr/bin/open -b \(quoteCommandPath(codexBundleIdentifier)) >/dev/null 2>&1; status=$?; printf '%s focus open_exit=%s hook_id=%s\\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$status" \(hookID) >> \(logPath); exit "$status"
-        """
     }
 
     public func install(binaryPath: String) throws -> InstallOutcome {
@@ -425,13 +413,14 @@ public struct CodexAutofocus: Sendable {
         return parts.joined(separator: " ")
     }
 
-    private func scheduleFocusAfterHookReturns(hookID: String) -> Int32 {
+    private func runProcess(executable: String, arguments: [String]) -> Int32 {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", delayedFocusShellCommand(hookID: hookID)]
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
         do {
             try process.run()
-            return 0
+            process.waitUntilExit()
+            return process.terminationStatus
         } catch {
             return 127
         }

@@ -179,32 +179,6 @@ final class CodexConfigDocumentTests: XCTestCase {
         XCTAssertEqual(CodexConfigDocument(text: updated).trustedHash(forHookStateKey: key), "sha256:abc123")
     }
 
-    func testDelayedFocusCommandRunsAfterStopHookReturns() {
-        let app = CodexAutofocus(
-            homeDirectory: URL(fileURLWithPath: "/tmp/codex-autofocus-tests"),
-            codexBundleIdentifier: "com.example.Codex App"
-        )
-
-        let command = app.delayedFocusShellCommand(delaySeconds: 1.25, hookID: "hook-1")
-
-        XCTAssertTrue(command.contains("sleep 1.25;"))
-        XCTAssertTrue(command.contains("focus firing hook_id=%s"))
-        XCTAssertTrue(command.contains("/usr/bin/open -b 'com.example.Codex App'"))
-        XCTAssertTrue(command.contains("focus open_exit=%s hook_id=%s"))
-    }
-
-    func testDelayedFocusCommandQuotesBundleIdentifier() {
-        let app = CodexAutofocus(
-            homeDirectory: URL(fileURLWithPath: "/tmp/codex-autofocus-tests"),
-            codexBundleIdentifier: "com.example.Codex'App"
-        )
-
-        XCTAssertTrue(
-            app.delayedFocusShellCommand(delaySeconds: 0.5, hookID: "hook'1")
-                .contains("/usr/bin/open -b 'com.example.Codex'\\''App'")
-        )
-    }
-
     func testHookDebugSummaryRedactsPromptContent() throws {
         let app = CodexAutofocus(homeDirectory: URL(fileURLWithPath: "/tmp/codex-autofocus-tests"))
         let payload = try JSONSerialization.data(withJSONObject: [
@@ -244,7 +218,8 @@ final class CodexConfigDocumentTests: XCTestCase {
         XCTAssertTrue(log.contains("hook_event_name='Stop'"))
         XCTAssertTrue(log.contains("thread_id='thread-1'"))
         XCTAssertTrue(log.contains("autofocus skipped reason=disabled"))
-        XCTAssertFalse(log.contains("focus schedule_exit"))
+        XCTAssertFalse(log.contains("focus starting"))
+        XCTAssertFalse(log.contains("focus open_exit"))
     }
 
     private struct Fixture {

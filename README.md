@@ -15,11 +15,6 @@ network requests, or control other apps. When it is enabled, it runs:
 /usr/bin/open -b com.openai.codex
 ```
 
-Codex runs `Stop` hooks right before it completes a turn. Codex Autofocus
-therefore schedules the focus action shortly after the hook starts and then lets
-the hook return immediately. That avoids pulling the app forward while Codex is
-still settling the final turn output.
-
 Each hook run also appends a short diagnostic line to:
 
 ```sh
@@ -27,7 +22,7 @@ Each hook run also appends a short diagnostic line to:
 ```
 
 The log records timing, hook event metadata, thread and turn ids when Codex
-provides them, and the result of the later focus command. It deliberately avoids
+provides them, and the result of the focus command. It deliberately avoids
 writing prompt text or assistant message text.
 
 ## Requirements
