@@ -126,6 +126,11 @@ public struct CodexAutofocus: Sendable {
             return 0
         }
 
+        if shouldSkipAutofocus(inputData: inputData) {
+            appendDebugLog("hook_id=\(hookID) autofocus skipped reason=ephemeral_session")
+            return 0
+        }
+
         appendDebugLog("hook_id=\(hookID) focus starting")
         let status = runProcess(executable: "/usr/bin/open", arguments: ["-b", codexBundleIdentifier])
         appendDebugLog("hook_id=\(hookID) focus open_exit=\(status)")
@@ -411,6 +416,28 @@ public struct CodexAutofocus: Sendable {
             .joined(separator: ",")
         parts.append("payload_keys=\(shellScalar(keys))")
         return parts.joined(separator: " ")
+    }
+
+    private func shouldSkipAutofocus(inputData: Data) -> Bool {
+        guard
+            !inputData.isEmpty,
+            let object = try? JSONSerialization.jsonObject(with: inputData),
+            let dictionary = object as? [String: Any],
+            let transcriptPath = dictionary["transcript_path"]
+        else {
+            return false
+        }
+
+        if transcriptPath is NSNull {
+            return true
+        }
+
+        if let string = transcriptPath as? String {
+            let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty || trimmed == "<null>"
+        }
+
+        return false
     }
 
     private func runProcess(executable: String, arguments: [String]) -> Int32 {

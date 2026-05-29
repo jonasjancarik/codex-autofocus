@@ -222,6 +222,27 @@ final class CodexConfigDocumentTests: XCTestCase {
         XCTAssertFalse(log.contains("focus open_exit"))
     }
 
+    func testNullTranscriptHookWritesDebugLogWithoutFocusing() throws {
+        let fixture = try makeFixture()
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "hook_event_name": "Stop",
+            "session_id": "internal-session",
+            "turn_id": "internal-turn",
+            "transcript_path": NSNull(),
+        ], options: [.sortedKeys])
+
+        XCTAssertEqual(fixture.app.handleHook(inputData: payload), 0)
+
+        let log = try String(contentsOf: fixture.app.debugLogURL, encoding: .utf8)
+        XCTAssertTrue(log.contains("hook received enabled=true"))
+        XCTAssertTrue(log.contains("session_id='internal-session'"))
+        XCTAssertTrue(log.contains("turn_id='internal-turn'"))
+        XCTAssertTrue(log.contains("transcript_path='<null>'"))
+        XCTAssertTrue(log.contains("autofocus skipped reason=ephemeral_session"))
+        XCTAssertFalse(log.contains("focus starting"))
+        XCTAssertFalse(log.contains("focus open_exit"))
+    }
+
     private struct Fixture {
         var root: URL
         var app: CodexAutofocus

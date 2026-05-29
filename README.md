@@ -25,6 +25,11 @@ The log records timing, hook event metadata, thread and turn ids when Codex
 provides them, and the result of the focus command. It deliberately avoids
 writing prompt text or assistant message text.
 
+Some Codex internals can also emit `Stop` hook events. When Codex sends a hook
+payload with a null transcript path, `codex-autofocus` treats it as an internal
+or ephemeral turn and skips bringing Codex forward. The skip is written to the
+debug log.
+
 ## Requirements
 
 - macOS 13 or newer
