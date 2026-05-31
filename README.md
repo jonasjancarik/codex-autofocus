@@ -8,6 +8,8 @@ It has two parts:
 - a command-line helper that Codex runs from a `Stop` hook
 - a menu bar app for turning the behavior on or off and repairing the hook setup
 
+![Codex Autofocus menu bar app](docs/assets/menu-bar-screenshot.png)
+
 The helper is intentionally narrow. It does not read your Codex transcript, send
 network requests, or control other apps. When it is enabled, it runs:
 
