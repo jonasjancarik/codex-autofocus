@@ -243,6 +243,62 @@ final class CodexConfigDocumentTests: XCTestCase {
         XCTAssertFalse(log.contains("focus open_exit"))
     }
 
+    func testDefaultMenuBarAppPathUsesStableHomebrewOptPath() throws {
+        let fixture = try makeFixture()
+
+        XCTAssertEqual(
+            fixture.app.defaultMenuBarAppPath(binaryPath: "/opt/homebrew/bin/codex-autofocus"),
+            "/opt/homebrew/opt/codex-autofocus/Codex Autofocus.app"
+        )
+        XCTAssertEqual(
+            fixture.app.defaultMenuBarAppPath(binaryPath: "/usr/local/bin/codex-autofocus"),
+            "/usr/local/opt/codex-autofocus/Codex Autofocus.app"
+        )
+    }
+
+    func testInstallAppShortcutCreatesUserApplicationsSymlink() throws {
+        let fixture = try makeFixture()
+        let appBundle = try makeFakeApp(in: fixture.root)
+
+        XCTAssertTrue(try fixture.app.installAppShortcut(appPath: appBundle.path))
+        XCTAssertTrue(fixture.app.appShortcutStatus(appPath: appBundle.path))
+        XCTAssertEqual(
+            try FileManager.default.destinationOfSymbolicLink(atPath: fixture.app.appShortcutURL.path),
+            appBundle.path
+        )
+        XCTAssertFalse(try fixture.app.installAppShortcut(appPath: appBundle.path))
+    }
+
+    func testInstallAppShortcutRefusesExistingNonSymlink() throws {
+        let fixture = try makeFixture()
+        let appBundle = try makeFakeApp(in: fixture.root)
+        try FileManager.default.createDirectory(at: fixture.app.userApplicationsURL, withIntermediateDirectories: true)
+        try "not managed".write(to: fixture.app.appShortcutURL, atomically: true, encoding: .utf8)
+
+        XCTAssertThrowsError(try fixture.app.installAppShortcut(appPath: appBundle.path)) { error in
+            XCTAssertTrue(String(describing: error).contains("A file already exists"))
+        }
+    }
+
+    func testLaunchAtLoginWritesLaunchAgent() throws {
+        let fixture = try makeFixture()
+        let appBundle = try makeFakeApp(in: fixture.root)
+
+        XCTAssertFalse(fixture.app.loginItemStatus(appPath: appBundle.path))
+        XCTAssertTrue(try fixture.app.setLaunchAtLogin(true, appPath: appBundle.path))
+        XCTAssertTrue(fixture.app.loginItemStatus(appPath: appBundle.path))
+        XCTAssertFalse(try fixture.app.setLaunchAtLogin(true, appPath: appBundle.path))
+
+        let plist = try String(contentsOf: fixture.app.loginAgentURL, encoding: .utf8)
+        XCTAssertTrue(plist.contains(CodexAutofocus.loginAgentLabel))
+        XCTAssertTrue(plist.contains(appBundle.path))
+        XCTAssertTrue(plist.contains("RunAtLoad"))
+
+        XCTAssertTrue(try fixture.app.setLaunchAtLogin(false, appPath: appBundle.path))
+        XCTAssertFalse(fixture.app.loginItemStatus(appPath: appBundle.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.app.loginAgentURL.path))
+    }
+
     private struct Fixture {
         var root: URL
         var app: CodexAutofocus
@@ -266,5 +322,21 @@ final class CodexConfigDocumentTests: XCTestCase {
         try FileManager.default.createDirectory(at: app.stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         try encoder.encode(state).write(to: app.stateURL, options: .atomic)
+    }
+
+    private func makeFakeApp(in root: URL) throws -> URL {
+        let appBundle = root.appendingPathComponent("Codex Autofocus.app", isDirectory: true)
+        let contents = appBundle.appendingPathComponent("Contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        try """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <plist version="1.0">
+        <dict>
+          <key>CFBundleName</key>
+          <string>Codex Autofocus</string>
+        </dict>
+        </plist>
+        """.write(to: contents.appendingPathComponent("Info.plist"), atomically: true, encoding: .utf8)
+        return appBundle
     }
 }

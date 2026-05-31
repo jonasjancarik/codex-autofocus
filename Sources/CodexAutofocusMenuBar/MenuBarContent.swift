@@ -21,6 +21,10 @@ struct MenuBarContent: View {
             }
             .disabled(!model.status.registered)
 
+            Button(model.status.startsAtLogin ? "Stop Opening at Login" : "Open at Login") {
+                model.setStartsAtLogin(!model.status.startsAtLogin)
+            }
+
             Menu("Advanced") {
                 Button(model.status.registered ? "Repair Codex Hook" : "Install Codex Hook") {
                     model.registerHook()

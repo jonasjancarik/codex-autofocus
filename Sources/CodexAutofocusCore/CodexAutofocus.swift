@@ -65,6 +65,7 @@ public struct CodexAutofocus: Sendable {
 
     public static let managedMarker = "--managed-by codex-autofocus"
     public static let hookStatusMessage = "Codex Autofocus is bringing Codex forward"
+    public static let loginAgentLabel = "com.jonasjancarik.codex-autofocus"
 
     public var homeDirectory: URL
     public var codexBundleIdentifier: String
@@ -99,6 +100,22 @@ public struct CodexAutofocus: Sendable {
         stateURL.deletingLastPathComponent().appendingPathComponent("debug.log")
     }
 
+    public var userApplicationsURL: URL {
+        homeDirectory.appendingPathComponent("Applications", isDirectory: true)
+    }
+
+    public var appShortcutURL: URL {
+        userApplicationsURL.appendingPathComponent("Codex Autofocus.app")
+    }
+
+    public var launchAgentsURL: URL {
+        homeDirectory.appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+    }
+
+    public var loginAgentURL: URL {
+        launchAgentsURL.appendingPathComponent("\(Self.loginAgentLabel).plist")
+    }
+
     public var defaultComputerUseNotify: NotifyCommand {
         NotifyCommand(
             executable: codexHome
@@ -110,6 +127,32 @@ public struct CodexAutofocus: Sendable {
 
     public func installedNotify(binaryPath: String) -> NotifyCommand {
         NotifyCommand(executable: binaryPath, arguments: ["turn-ended"])
+    }
+
+    public func defaultMenuBarAppPath(binaryPath: String) -> String {
+        if binaryPath == "/opt/homebrew/bin/codex-autofocus" {
+            return "/opt/homebrew/opt/codex-autofocus/Codex Autofocus.app"
+        }
+        if binaryPath == "/usr/local/bin/codex-autofocus" {
+            return "/usr/local/opt/codex-autofocus/Codex Autofocus.app"
+        }
+
+        let binaryURL = URL(fileURLWithPath: binaryPath)
+        let directory = binaryURL.deletingLastPathComponent()
+
+        if directory.lastPathComponent == "Resources",
+           directory.deletingLastPathComponent().lastPathComponent == "Contents"
+        {
+            return directory
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .path
+        }
+
+        return directory
+            .deletingLastPathComponent()
+            .appendingPathComponent("Codex Autofocus.app")
+            .path
     }
 
     public func managedHookCommand(binaryPath: String) -> String {
@@ -192,6 +235,62 @@ public struct CodexAutofocus: Sendable {
         state.hookCommand = managedHookCommand(binaryPath: binaryPath)
         try writeState(state)
         return state
+    }
+
+    public func installAppShortcut(appPath: String) throws -> Bool {
+        let appURL = URL(fileURLWithPath: appPath)
+        try validateMenuBarApp(at: appURL)
+        try FileManager.default.createDirectory(at: userApplicationsURL, withIntermediateDirectories: true)
+
+        if let existingDestination = try? FileManager.default.destinationOfSymbolicLink(atPath: appShortcutURL.path) {
+            if existingDestination == appURL.path {
+                return false
+            }
+            try FileManager.default.removeItem(at: appShortcutURL)
+        } else if FileManager.default.fileExists(atPath: appShortcutURL.path) {
+            throw CodexAutofocusError.appShortcutExists(appShortcutURL.path)
+        }
+
+        try FileManager.default.createSymbolicLink(at: appShortcutURL, withDestinationURL: appURL)
+        return true
+    }
+
+    public func uninstallAppShortcut() throws -> Bool {
+        if (try? FileManager.default.destinationOfSymbolicLink(atPath: appShortcutURL.path)) != nil {
+            try FileManager.default.removeItem(at: appShortcutURL)
+            return true
+        }
+        if FileManager.default.fileExists(atPath: appShortcutURL.path) {
+            throw CodexAutofocusError.appShortcutExists(appShortcutURL.path)
+        }
+        return false
+    }
+
+    public func appShortcutStatus(appPath: String) -> Bool {
+        guard let existingDestination = try? FileManager.default.destinationOfSymbolicLink(atPath: appShortcutURL.path) else {
+            return false
+        }
+        return existingDestination == URL(fileURLWithPath: appPath).path
+    }
+
+    public func setLaunchAtLogin(_ enabled: Bool, appPath: String) throws -> Bool {
+        if enabled {
+            return try installLoginAgent(appPath: appPath)
+        }
+        return try uninstallLoginAgent()
+    }
+
+    public func loginItemStatus(appPath: String) -> Bool {
+        guard
+            let data = try? Data(contentsOf: loginAgentURL),
+            let object = try? PropertyListSerialization.propertyList(from: data, format: nil),
+            let dictionary = object as? [String: Any],
+            let arguments = dictionary["ProgramArguments"] as? [String]
+        else {
+            return false
+        }
+
+        return arguments == ["/usr/bin/open", URL(fileURLWithPath: appPath).path]
     }
 
     public func trustInstalledHook(binaryPath: String) throws -> TrustOutcome {
@@ -322,6 +421,49 @@ public struct CodexAutofocus: Sendable {
         FileManager.default.isExecutableFile(atPath: defaultComputerUseNotify.executable)
             ? defaultComputerUseNotify
             : nil
+    }
+
+    private func installLoginAgent(appPath: String) throws -> Bool {
+        let appURL = URL(fileURLWithPath: appPath)
+        try validateMenuBarApp(at: appURL)
+        if loginItemStatus(appPath: appURL.path) {
+            return false
+        }
+
+        try FileManager.default.createDirectory(at: launchAgentsURL, withIntermediateDirectories: true)
+        let data = try loginAgentData(appPath: appURL.path)
+        try data.write(to: loginAgentURL, options: .atomic)
+        return true
+    }
+
+    private func uninstallLoginAgent() throws -> Bool {
+        guard FileManager.default.fileExists(atPath: loginAgentURL.path) else {
+            return false
+        }
+
+        try FileManager.default.removeItem(at: loginAgentURL)
+        return true
+    }
+
+    private func loginAgentData(appPath: String) throws -> Data {
+        let propertyList: [String: Any] = [
+            "Label": Self.loginAgentLabel,
+            "LimitLoadToSessionType": "Aqua",
+            "ProgramArguments": ["/usr/bin/open", appPath],
+            "RunAtLoad": true,
+        ]
+        return try PropertyListSerialization.data(
+            fromPropertyList: propertyList,
+            format: .xml,
+            options: 0
+        )
+    }
+
+    private func validateMenuBarApp(at appURL: URL) throws {
+        let infoPlistURL = appURL.appendingPathComponent("Contents/Info.plist")
+        guard FileManager.default.fileExists(atPath: infoPlistURL.path) else {
+            throw CodexAutofocusError.missingMenuBarApp(appURL.path)
+        }
     }
 
     private func loadHooksDocument() throws -> CodexHooksDocument {

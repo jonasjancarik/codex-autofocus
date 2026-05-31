@@ -7,6 +7,7 @@ final class MenuBarModel: ObservableObject {
     struct DisplayStatus {
         var enabled = false
         var registered = false
+        var startsAtLogin = false
         var issues: [String] = ["Status has not loaded."]
     }
 
@@ -15,6 +16,15 @@ final class MenuBarModel: ObservableObject {
 
     private let autofocus = CodexAutofocus()
     private var refreshTask: Task<Void, Never>?
+
+    private var menuBarAppPath: String {
+        let helperAppPath = autofocus.defaultMenuBarAppPath(binaryPath: helperPath)
+        let helperInfoPlist = URL(fileURLWithPath: helperAppPath).appendingPathComponent("Contents/Info.plist")
+        if FileManager.default.fileExists(atPath: helperInfoPlist.path) {
+            return helperAppPath
+        }
+        return Bundle.main.bundleURL.path
+    }
 
     init() {
         refresh()
@@ -90,6 +100,7 @@ final class MenuBarModel: ObservableObject {
             status = DisplayStatus(
                 enabled: next.enabled,
                 registered: next.registered,
+                startsAtLogin: autofocus.loginItemStatus(appPath: menuBarAppPath),
                 issues: next.issues
             )
             lastErrorMessage = nil
@@ -102,6 +113,15 @@ final class MenuBarModel: ObservableObject {
     func setEnabled(_ enabled: Bool) {
         do {
             _ = try autofocus.setEnabled(enabled, binaryPath: helperPath)
+            refresh()
+        } catch {
+            lastErrorMessage = String(describing: error)
+        }
+    }
+
+    func setStartsAtLogin(_ enabled: Bool) {
+        do {
+            _ = try autofocus.setLaunchAtLogin(enabled, appPath: menuBarAppPath)
             refresh()
         } catch {
             lastErrorMessage = String(describing: error)

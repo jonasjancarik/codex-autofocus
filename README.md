@@ -56,6 +56,24 @@ Start the menu bar app with:
 codex-autofocus-menu
 ```
 
+Homebrew formula apps do not always show up in Spotlight because the app bundle
+lives under Homebrew's install prefix. To make `Codex Autofocus` available from
+Spotlight, create a user Applications shortcut:
+
+```sh
+codex-autofocus install-app --app "$(brew --prefix codex-autofocus)/Codex Autofocus.app"
+```
+
+To start the menu bar app automatically, turn on `Open at Login` from the app
+menu or run:
+
+```sh
+codex-autofocus enable-login-item --app "$(brew --prefix codex-autofocus)/Codex Autofocus.app"
+```
+
+This creates a per-user LaunchAgent. It starts the app when you log in to macOS,
+which is the practical version of "start on boot" for a menu bar app.
+
 The first command installs the helper and menu app. The `codex-autofocus install`
 command registers the Codex hook. Codex may still ask you to approve that hook
 before it runs.
@@ -117,6 +135,7 @@ The menu is intentionally small:
 
 - current state, such as `On · Hook installed`
 - `Turn Autofocus On` or `Turn Autofocus Off`
+- `Open at Login` or `Stop Opening at Login`
 - `Advanced` repair and file actions
 - `Quit Codex Autofocus`
 

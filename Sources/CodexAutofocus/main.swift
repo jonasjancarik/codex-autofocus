@@ -13,16 +13,29 @@ func printUsage() {
       codex-autofocus enable [--binary <path>]
       codex-autofocus disable [--binary <path>]
       codex-autofocus status [--binary <path>]
+      codex-autofocus install-app [--app <path>]
+      codex-autofocus uninstall-app
+      codex-autofocus enable-login-item [--app <path>]
+      codex-autofocus disable-login-item
+      codex-autofocus login-item-status [--app <path>]
 
     Codex should call this from a Stop hook in ~/.codex/hooks.json.
     """)
 }
 
-func binaryPath(from arguments: [String]) -> String {
-    guard let flagIndex = arguments.firstIndex(of: "--binary"), arguments.indices.contains(flagIndex + 1) else {
-        return CommandLine.arguments[0]
+func value(after flag: String, in arguments: [String]) -> String? {
+    guard let flagIndex = arguments.firstIndex(of: flag), arguments.indices.contains(flagIndex + 1) else {
+        return nil
     }
     return arguments[flagIndex + 1]
+}
+
+func binaryPath(from arguments: [String]) -> String {
+    value(after: "--binary", in: arguments) ?? CommandLine.arguments[0]
+}
+
+func appPath(from arguments: [String]) -> String {
+    value(after: "--app", in: arguments) ?? app.defaultMenuBarAppPath(binaryPath: binaryPath(from: arguments))
 }
 
 func describe(_ command: NotifyCommand?) -> String {
@@ -78,6 +91,34 @@ do {
                 print("- \(issue)")
             }
         }
+
+    case "install-app":
+        let target = appPath(from: arguments)
+        let changed = try app.installAppShortcut(appPath: target)
+        print(changed ? "Codex Autofocus app shortcut installed" : "Codex Autofocus app shortcut already installed")
+        print("shortcut: \(app.appShortcutURL.path)")
+        print("app: \(target)")
+
+    case "uninstall-app":
+        let changed = try app.uninstallAppShortcut()
+        print(changed ? "Codex Autofocus app shortcut removed" : "Codex Autofocus app shortcut was not installed")
+
+    case "enable-login-item":
+        let target = appPath(from: arguments)
+        let changed = try app.setLaunchAtLogin(true, appPath: target)
+        print(changed ? "Codex Autofocus will open at login" : "Codex Autofocus was already set to open at login")
+        print("launch agent: \(app.loginAgentURL.path)")
+        print("app: \(target)")
+
+    case "disable-login-item":
+        let changed = try app.setLaunchAtLogin(false, appPath: appPath(from: arguments))
+        print(changed ? "Codex Autofocus will not open at login" : "Codex Autofocus login item was not installed")
+
+    case "login-item-status":
+        let target = appPath(from: arguments)
+        print(app.loginItemStatus(appPath: target) ? "enabled" : "disabled")
+        print("launch agent: \(app.loginAgentURL.path)")
+        print("app: \(target)")
 
     case "-h", "--help", nil:
         printUsage()
